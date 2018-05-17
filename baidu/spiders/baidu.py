@@ -4,6 +4,7 @@ import re
 import scrapy
 import urlparse
 import json
+import math
 from bs4 import BeautifulSoup
 from scrapy.http import Request
 from baidu.TbaiduItems import BaiduItem,ContentItem,ReplyItem
@@ -14,6 +15,7 @@ class Myspider(scrapy.Spider):
     allowed_domins = ['baidu.com']
     bash_url = 'http://tieba.baidu.com/f?kw=%E5%89%91%E7%BD%913&fr=index'
     base_url='http://tieba.baidu.com'
+    comment_url='http://tieba.baidu.com/p/comment'
 
     def start_requests(self):
             # print('url---------------------:'+url)
@@ -25,6 +27,7 @@ class Myspider(scrapy.Spider):
         get_page = int(pg) / 50
         for i in range(0, get_page):
             yield Request(self.bash_url + '&pn=' + str(i * 50), self.parse_all)
+        # yield Request('https://tieba.baidu.com/p/5302194011?pn=1',self.get_all_content)
 
     def parse_all(self, response):
          print('--------------------start scrapy----------------------')
@@ -66,9 +69,21 @@ class Myspider(scrapy.Spider):
             data_info=json.loads(json_info)
             item['author_info']=data_info['author']
             item['content']=data_info['content']
+            comment=data_info['content']['comment_num']
+            print('------------comment_num:'+str(comment)+'---------------------')
+            comment_page=math.ceil(float(comment)/10)
+            comment_page=int(comment_page);
+            item['post_id']=data_info['content']['post_id']
+            item['thread_id']=data_info['content']['thread_id']
             item['floor_num']=data_info['content']['post_no']
             item['created_at']=box.xpath(".//span[contains(@class,'tail-info')]/text()").extract()[2] if len(box.xpath(".//span[contains(@class,'tail-info')]/text()").extract())>2 else box.xpath(".//span[contains(@class,'tail-info')]/text()").extract()[1]  
+            print('--------------comment_page:'+str(comment_page)+'----------------')
             yield item
+            if comment_page>0:
+               for i in range(1,comment_page):
+            #        print('------------test:'+str(i)+'--------------')
+                   yield Request(self.comment_url+'?tid='+str(data_info['content']['thread_id'])+'&pid='+str(data_info['content']['post_id'])+'&pn='+str(i),self.get_comment)
+            
     def get_content_page(self,response):
         page=response.xpath("//div[contains(@class,'p_thread thread_theme_5')]/div[@class='l_thread_info']/ul/li[@class='l_reply_num']/span[@class='red']/text()").extract()[1]
         return page        
@@ -84,3 +99,21 @@ class Myspider(scrapy.Spider):
             pg = dict((k, v if len(v) > 1 else v[0])
                       for k, v in urlparse.parse_qs(parse[4]).iteritems())
             return pg['pn']
+    def get_comment(self,response):
+        url=response.url
+        query=urlparse.urlparse(url).query
+        querys=dict([(k, v[0]) for k, v in urlparse.parse_qs(query).items()])
+        print(querys);
+        item=ReplyItem()
+        body=response.xpath("//li[contains(@class,'lzl_single_post j_lzl_s_p')]")
+        for bg in body:
+            user_name=bg.xpath(".//div[contains(@class,'lzl_cnt')]/a[contains(@class,'at j_user_card ')]/text()").extract_first()
+            content=bg.xpath(".//div[contains(@class,'lzl_cnt')]/span").extract_first()
+            item['user_name']=user_name
+            item['content']=content
+            item['post_id']=querys['pid']
+            item['thread_id']=query['tid']
+            item['created_at']=bg.xpath(".//div[contains(@class,'lzl_cnt')]/div[contains(@class,'lzl_content_reply')/span[contains(@class,'lzl_time')]/text()]").extract_first()
+            yield item
+            
+        
